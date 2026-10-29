@@ -1,0 +1,144 @@
+package ir.abrova.chat.events
+
+import ir.abrova.chat.models.Message
+import ir.abrova.chat.models.SubscriptionStatus
+import org.json.JSONObject
+import java.time.Instant
+
+/** Event emitted when a user reads messages in a room. */
+data class ReadReceipt(
+    val userId: String,
+    val roomId: String,
+    val readAt: Instant
+) {
+    companion object {
+        fun fromJson(json: JSONObject): ReadReceipt {
+            return ReadReceipt(
+                userId = json.getString("userId"),
+                roomId = json.getString("roomId"),
+                readAt = Instant.parse(json.getString("readAt"))
+            )
+        }
+    }
+}
+
+/** Event emitted when a message is deleted. */
+data class MessageDeletion(
+    val messageId: String,
+    val roomId: String,
+    val deletedBy: String
+) {
+    companion object {
+        fun fromJson(json: JSONObject): MessageDeletion {
+            return MessageDeletion(
+                messageId = json.getString("messageId"),
+                roomId = json.getString("roomId"),
+                deletedBy = json.getString("deletedBy")
+            )
+        }
+    }
+}
+
+/** Event emitted when a user is typing. */
+data class TypingEvent(
+    val roomId: String,
+    val userId: String,
+    val isTyping: Boolean = true
+)
+
+/** Event emitted when a reaction is added or removed. */
+data class ReactionEvent(
+    val messageId: String,
+    val roomId: String,
+    val userId: String,
+    val emoji: String,
+    val added: Boolean,
+    val reactionId: String? = null
+)
+
+/** Event emitted when a message is edited. */
+data class MessageEditEvent(
+    val messageId: String,
+    val roomId: String,
+    val content: String,
+    val editedBy: String,
+    val editedAt: Instant
+)
+
+/** Event emitted when a message is pinned or unpinned. */
+data class MessagePinEvent(
+    val messageId: String,
+    val roomId: String,
+    val userId: String,
+    val pinned: Boolean
+)
+
+/** Event emitted when a connection error occurs. */
+data class ConnectionErrorEvent(
+    val error: Any
+)
+
+/** Event emitted when user presence changes. */
+data class PresenceEvent(
+    val roomId: String,
+    val userId: String,
+    val isOnline: Boolean
+)
+
+/** Event emitted when subscription state changes. */
+data class SubscriptionStateEvent(
+    val roomId: String,
+    val channel: String,
+    val status: SubscriptionStatus,
+    val code: Int? = null,
+    val reason: String? = null
+)
+
+/**
+ * The server refused the user's identity and a token refresh cannot fix it:
+ * the token was revoked or invalid, the project requires a token, or the
+ * app's tokenProvider failed. Typically: send the user to login.
+ *
+ * [code] is the server's reason (`token_revoked`, `token_invalid`,
+ * `token_required`, `token_expired` after a failed refresh) or
+ * `token_provider_failed`.
+ */
+data class AuthErrorEvent(
+    val code: String,
+    val message: String,
+    val error: Throwable? = null
+)
+
+/**
+ * A message queued while offline was stored by the server
+ * (only with `queueOfflineMessages`).
+ *
+ * [localId] is the pending message's id (`local_<clientMessageId>`);
+ * [message] is the stored message. The live message event for it still
+ * arrives and carries the same [clientMessageId].
+ */
+data class MessageSentEvent(
+    val localId: String,
+    val clientMessageId: String,
+    val message: Message
+)
+
+/**
+ * A message queued while offline left the queue without being stored
+ * (only with `queueOfflineMessages`).
+ *
+ * [reason] is [REASON_EXPIRED] (it waited more than 24 hours) or
+ * [REASON_REJECTED] (the server refused it, e.g. not a member any more).
+ */
+data class MessageFailedEvent(
+    val localId: String,
+    val clientMessageId: String,
+    val roomId: String,
+    val error: String,
+    val reason: String
+) {
+    companion object {
+        const val REASON_EXPIRED = "expired"
+        const val REASON_REJECTED = "rejected"
+    }
+}

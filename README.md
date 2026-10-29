@@ -1,0 +1,246 @@
+# AbrovaChat Android SDK
+
+Real-time messaging SDK for Android. Add chat to your app with pre-built Compose UI components, real-time messaging, read receipts, typing indicators, reactions, and push notifications.
+
+## Features
+
+- Real-time messaging via WebSocket (<50ms latency)
+- Pre-built Jetpack Compose UI components (chat screen, message bubbles, input field, typing indicator, etc.)
+- Read receipts with delivery status (sent, delivered, read)
+- Emoji reactions and message pinning
+- Typing and presence indicators
+- Threaded replies and swipe-to-reply
+- File and image sharing with inline previews
+- Full-text message search
+- Unread message counts
+- Push notifications via [Abrova Push](https://abrova.ir/cloud/abrova-push) for offline users
+- Customizable theming with Material 3
+
+## Installation
+
+### Gradle
+
+The SDK is published on [Abrova Center](https://center.abrova.ir). Add its repository in `settings.gradle.kts` (or `settings.gradle`):
+
+```kotlin
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+        maven { url = uri("https://center.abrova.ir/api/packages/abrova/maven") }
+    }
+}
+```
+
+Then add the dependencies to your module's `build.gradle.kts`:
+
+```kotlin
+dependencies {
+    implementation("ir.abrova:abrova-chat-android:0.2.0")
+    implementation("ir.abrova:abrova-chat-android-ui:0.2.0")
+}
+```
+
+## Quick Start
+
+### 1. Initialize the Client
+
+```kotlin
+import ir.abrova.chat.AbrovaChatClient
+import ir.abrova.chat.AbrovaChatConfig
+
+val config = AbrovaChatConfig(
+    apiKey = "your_api_key",
+    userId = "user-123",
+    userInfo = mapOf("displayName" to "John")
+)
+
+val client = AbrovaChatClient(config)
+client.connect()
+```
+
+### Secure user identity (recommended)
+
+Your API key ships inside the app, so on its own it cannot prove who the user
+is. Add a `tokenProvider` that asks **your server** for a user token:
+
+```kotlin
+val config = AbrovaChatConfig(
+    apiKey = "your_api_key",
+    userId = "user-123",
+    tokenProvider = { myBackend.getChatToken() }  // suspend fun returning the token
+)
+
+// Revoked or invalid token — send the user to login.
+scope.launch { client.onAuthError.collect { signOut() } }
+```
+
+Your server mints it with the server secret (never put the secret in the app):
+
+```http
+POST https://chat.abrova.ir/api/v1/users/token
+x-api-key: your_api_key
+x-server-secret: your_server_secret
+
+{ "userId": "user-123" }
+```
+
+Tokens last 1 hour. The SDK refreshes them before they expire and retries a
+request once if the server reports an expired token, so users never notice.
+
+### 2. Create or Join a Room
+
+```kotlin
+val room = client.findOrCreateRoom(
+    externalId = "order-123",
+    participants = listOf(
+        mapOf("externalUserId" to "user-123", "displayName" to "John", "role" to "member"),
+        mapOf("externalUserId" to "user-456", "displayName" to "Jane", "role" to "member")
+    )
+)
+```
+
+### 3. Send Messages
+
+```kotlin
+val message = client.sendMessage(room.id, content = "Hello!")
+```
+
+### 4. Listen for Real-Time Events
+
+```kotlin
+// New messages
+client.onMessage.collect { message ->
+    println("New message: ${message.content}")
+}
+
+// Typing indicators
+client.onTypingEvent.collect { event ->
+    println("${event.userId} is typing: ${event.isTyping}")
+}
+
+// Presence (online/offline)
+client.onPresenceChange.collect { event ->
+    println("${event.userId} is online: ${event.isOnline}")
+}
+
+// Read receipts
+client.onReadReceipt.collect { event ->
+    println("${event.userId} read messages at ${event.readAt}")
+}
+```
+
+### 5. Mark Messages as Read
+
+```kotlin
+client.markAsRead(room.id)
+```
+
+### 6. Search Messages
+
+```kotlin
+val result = client.searchMessagesWithTotal(room.id, query = "Order #1001")
+println("${result.total} matches")
+result.messages.forEach { println(it.content) }
+```
+
+`total` counts every match, not only this page; `hasMore` says whether another page follows (pass `limit` and `offset` to page). `searchMessages()` still returns only the list.
+
+## Sending while offline
+
+By default `sendMessage()` throws when there is no network. Turn on the offline queue to keep such messages and send them when the connection is back, in the order written and never twice:
+
+```kotlin
+val client = AbrovaChatClient(
+    AbrovaChatConfig(
+        apiKey = "ab_live_demo_app",
+        userId = "user-42",
+        queueOfflineMessages = true
+    )
+)
+
+val message = client.sendMessage(roomId, content = "Order #1001 is ready")
+if (message.isPending) {
+    // Queued: shown as waiting, sent when the network is back
+}
+
+scope.launch {
+    client.onMessageSent.collect { event ->
+        // event.localId (the pending id) -> event.message (the stored message)
+    }
+}
+scope.launch {
+    client.onMessageFailed.collect { event ->
+        // event.reason: "expired" (waited 24 hours) or "rejected" (refused by the server)
+    }
+}
+```
+
+- Only network failures are queued (no network, timeout, a failing `tokenProvider`, 5xx, 408, 429). Errors the server answers, such as not a member of the room or an invalid message, still throw.
+- A queued message has `isPending = true`, the id `local_<clientMessageId>` and `clientMessageId`. The stored message (and its live `onMessage` event) carries the same `clientMessageId`, so you can replace the pending copy.
+- The queue is sent when the realtime connection comes back, and with `retryPendingMessages()`. `getPendingMessages(roomId)` lists what waits; `cancelPendingMessage(localId)` removes one (a message already being sent cannot be recalled). Queued messages of another user on the same device are never sent.
+- Attachments must already be uploaded (URLs); uploads themselves are not queued.
+- The queue lives in memory. To keep it across app restarts, pass `context = applicationContext` (SharedPreferences), or your own `outboxStore`:
+
+```kotlin
+AbrovaChatConfig(
+    apiKey = "ab_live_demo_app",
+    userId = "user-42",
+    queueOfflineMessages = true,
+    context = applicationContext
+)
+```
+
+Call `client.clearPendingMessages()` on sign-out when another user may sign in on the device. The UI kit's chat screen shows queued messages as "Waiting for network…".
+
+## Modules
+
+| Module | Description | Min SDK |
+|--------|-------------|---------|
+| `abrova-chat-android` | Core SDK - API client, real-time messaging, models | API 21 |
+| `abrova-chat-android-ui` | Pre-built Compose UI components with Material 3 theming | API 21 |
+
+## UI Components
+
+`abrova-chat-android-ui` includes ready-to-use Jetpack Compose components:
+
+- `ChatScreen` - Full chat screen with messages, input, and state management
+- `ChatMessageBubble` - Message bubble with read receipts, reactions, and reply preview
+- `ChatInputField` - Text input with attachment and typing indicator support
+- `TypingIndicator` - Animated typing dots
+- `PresenceIndicator` - Online/offline status dot
+- `UnreadBadge` - Unread message count badge
+- `MessageReactionPicker` - Emoji reaction selector
+- `ChatRoomListTile` - Room list item with last message preview
+- `ReadReceipts` - Delivery status indicators (sent, delivered, read)
+- `SwipeableMessage` - Swipe-to-reply gesture
+- `MessageSearchBar` - Full-text message search
+
+## Example App
+
+The `android_ecommerce/` directory contains a complete e-commerce chat example demonstrating:
+
+- Buyer/seller chat for order support
+- Real-time messaging with read receipts
+- Typing and presence indicators
+- Emoji reactions and message pinning
+- Push notifications (via Abrova Push)
+- Unread message badges
+- Message pagination
+- Reply to messages
+
+To run it, copy `android_ecommerce/local.properties.example` into `android_ecommerce/local.properties` and set `ABROVA_API_KEY` to your project's public key (`ab_live_...`) from [Abrova Console](https://console.abrova.ir). `local.properties` is gitignored, so your key stays out of version control.
+
+## Push Notifications
+
+AbrovaChat integrates with [Abrova Push](https://abrova.ir/cloud/abrova-push) for offline push notifications.
+
+## Links
+
+- [Abrova Chat](https://abrova.ir/cloud/abrova-chat) - Learn more about Abrova Chat
+- [Documentation](https://abrova.ir/cloud/abrova-chat/docs/quick-start) - Full documentation and guides
+- [Abrova Console](https://console.abrova.ir) - Manage your chat rooms
+
+## License
+
+MIT

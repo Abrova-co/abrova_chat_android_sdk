@@ -1,0 +1,89 @@
+package ir.abrova.chat
+
+import android.content.Context
+import ir.abrova.chat.outbox.OutboxStore
+import java.io.File
+
+/**
+ * Result of a file upload operation.
+ */
+data class FileUploadResult(
+    val url: String,
+    val mimeType: String? = null,
+    val name: String? = null,
+    val size: Int? = null
+)
+
+/**
+ * Callback type for uploading files.
+ *
+ * Implement this to integrate with your storage service (S3, Firebase, Supabase, etc.).
+ */
+typealias FileUploader = suspend (File) -> FileUploadResult
+
+/**
+ * Returns a user token for the current user, issued by your server.
+ *
+ * Your server calls `POST https://chat.abrova.ir/api/v1/users/token` with the
+ * `x-server-secret` header (Node SDK: `chat.users.createToken`) and returns the
+ * token to the app. Never put the server secret in the app.
+ */
+typealias ChatTokenProvider = suspend () -> String
+
+/**
+ * Configuration for AbrovaChat SDK.
+ *
+ * @param apiKey Your AbrovaChat API key
+ * @param userId The external user ID for the current user
+ * @param userInfo Optional user info (displayName, locale, etc.)
+ * @param fileUploader Optional file uploader callback for sending attachments
+ * @param tokenProvider Recommended. Proves who the user is: every request
+ *   carries a token your server issued, so nobody holding the public [apiKey]
+ *   can act as another user. Called on connect, shortly before the token
+ *   expires, and when the server reports an expired token — refreshes are
+ *   invisible to the user. Without it the SDK uses the legacy mode
+ *   (API key + [userId]), which a project can disable in Abrova Console.
+ * @param queueOfflineMessages Off by default: `sendMessage()` without network
+ *   throws, as before. When on, a message that cannot be sent because of the
+ *   network (no network, timeout, server busy) is kept and sent when the
+ *   connection is back, in order and never twice; `sendMessage()` returns it
+ *   as a pending message (`isPending = true`). See `onMessageSent` and
+ *   `onMessageFailed`.
+ * @param context Optional. With [queueOfflineMessages], keeps the queue in
+ *   SharedPreferences so it survives an app restart (otherwise in memory).
+ * @param outboxStore Optional. Your own storage for the queue; wins over
+ *   [context].
+ */
+data class AbrovaChatConfig(
+    val apiKey: String,
+    val userId: String,
+    val userInfo: Map<String, String>? = null,
+    val fileUploader: FileUploader? = null,
+    val tokenProvider: ChatTokenProvider? = null,
+    val queueOfflineMessages: Boolean = false,
+    val context: Context? = null,
+    val outboxStore: OutboxStore? = null
+) {
+    init {
+        require(apiKey.isNotBlank()) { "API key cannot be blank" }
+        require(userId.isNotBlank()) { "User ID cannot be blank" }
+    }
+
+    companion object {
+        /** Base URL for the AbrovaChat API. */
+        const val BASE_URL = "https://chat.abrova.ir"
+
+        /** WebSocket URL for the realtime server. */
+        const val REALTIME_URL = "wss://ws-chat.abrova.ir/connection/websocket"
+
+        /** WebSocket URL for the realtime server. */
+        @Deprecated("Use REALTIME_URL", ReplaceWith("REALTIME_URL"))
+        const val CENTRIFUGO_URL = REALTIME_URL
+
+        /** Name this SDK reports to the API. */
+        const val SDK_NAME = "android"
+
+        /** Version of this SDK. */
+        const val SDK_VERSION = BuildConfig.SDK_VERSION
+    }
+}

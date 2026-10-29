@@ -1,0 +1,6 @@
+# Copy the line below into local.properties (next to this file) and fill in
+# your key. local.properties is gitignored: never commit it.
+
+# Your project's public key (ab_live_...) from https://console.abrova.ir,
+# used by Abrova Chat and Abrova Push in this example.
+ABROVA_API_KEY=ab_live_your_api_key
